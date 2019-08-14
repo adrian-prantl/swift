@@ -1094,11 +1094,6 @@ GenericTypeDecl *ASTBuilder::findForeignTypeDecl(StringRef name,
     break;
   case ForeignModuleKind::Imported:
     importer->lookupTypeDecl(name, *lookupKind, found);
-
-    // Try the DWARFImporter if it exists.
-    if (!consumer.Result)
-      if (auto *dwarf_importer = Ctx.getDWARFModuleLoader())
-        dwarf_importer->lookupTypeDecl(name, *lookupKind, found);
   }
 
   return consumer.Result;

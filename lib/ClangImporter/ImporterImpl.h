@@ -318,11 +318,11 @@ class LLVM_LIBRARY_VISIBILITY ClangImporter::Implementation
     public LazyConformanceLoader
 {
   friend class ClangImporter;
-  friend class DWARFImporter;
   using Version = importer::ImportNameVersion;
 
 public:
-  Implementation(ASTContext &ctx, const ClangImporterOptions &opts);
+  Implementation(ASTContext &ctx, const ClangImporterOptions &opts,
+                 std::unique_ptr<DWARFImporterDelegate> dwarfImporterDelegate);
   ~Implementation();
 
   /// Swift AST context.
@@ -603,6 +603,10 @@ public:
   void addBridgeHeaderTopLevelDecls(clang::Decl *D);
   bool shouldIgnoreBridgeHeaderTopLevelDecl(clang::Decl *D);
 
+private:
+  /// The DWARF importer delegate, if installed.
+  std::unique_ptr<DWARFImporterDelegate> DWARFImporter;
+  
 public:
   void recordImplicitUnwrapForDecl(Decl *decl, bool isIUO) {
 #if !defined(NDEBUG)
@@ -1307,6 +1311,10 @@ public:
   /// Swift lookup table.
   void lookupValue(SwiftLookupTable &table, DeclName name,
                    VisibleDeclConsumer &consumer);
+
+  /// Look for namespace-scope values with the given name using the
+  /// DWARFImporterDelegate.
+  void lookupValueDWARF(DeclName name, VisibleDeclConsumer &consumer);
 
   /// Look for namespace-scope values in the given Swift lookup table.
   void lookupVisibleDecls(SwiftLookupTable &table,

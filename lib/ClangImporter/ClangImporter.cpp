@@ -386,12 +386,12 @@ bool ClangImporter::Implementation::shouldIgnoreBridgeHeaderTopLevelDecl(
   return false;
 }
 
-ClangImporter::ClangImporter(ASTContext &ctx,
-                             const ClangImporterOptions &clangImporterOpts,
-                             DependencyTracker *tracker)
-  : ClangModuleLoader(tracker),
-    Impl(*new Implementation(ctx, clangImporterOpts))
-{
+ClangImporter::ClangImporter(
+    ASTContext &ctx, const ClangImporterOptions &clangImporterOpts,
+    DependencyTracker *tracker,
+    std::unique_ptr<DWARFImporterDelegate> dwarfImporterDelegate)
+    : ClangModuleLoader(tracker),
+      Impl(*new Implementation(ctx, clangImporterOpts, dwarfImporterDelegate)) {
 }
 
 ClangImporter::~ClangImporter() {
@@ -909,13 +909,12 @@ ClangImporter::getOrCreatePCH(const ClangImporterOptions &ImporterOptions,
   return PCHFilename.getValue();
 }
 
-std::unique_ptr<ClangImporter>
-ClangImporter::create(ASTContext &ctx,
-                      const ClangImporterOptions &importerOpts,
-                      std::string swiftPCHHash,
-                      DependencyTracker *tracker) {
+std::unique_ptr<ClangImporter> ClangImporter::create(
+    ASTContext &ctx, const ClangImporterOptions &importerOpts,
+    std::string swiftPCHHash, DependencyTracker *tracker,
+    std::unique_ptr<DWARFImporterDelegate> dwarfImporterDelegate) {
   std::unique_ptr<ClangImporter> importer{
-    new ClangImporter(ctx, importerOpts, tracker)
+    new ClangImporter(ctx, importerOpts, tracker, dwarfImporterDelegate)
   };
 
   std::vector<std::string> invocationArgStrs;
@@ -1575,7 +1574,7 @@ bool ClangImporter::canImportModule(std::pair<Identifier, SourceLoc> moduleID) {
   return clangModule->isAvailable(ctx.getLangOpts(), getTargetInfo(), r, mh, m);
 }
 
-ModuleDecl *ClangImporter::loadModule(
+ModuleDecl *ClangImporter::loadModuleClang(
     SourceLoc importLoc,
     ArrayRef<std::pair<Identifier, SourceLoc>> path) {
   auto &clangContext = Impl.getClangASTContext();
@@ -1666,6 +1665,15 @@ ModuleDecl *ClangImporter::loadModule(
     return nullptr;
 
   return Impl.finishLoadingClangModule(clangModule, /*preferOverlay=*/false);
+}
+
+ModuleDecl *ClangImporter::loadModule(
+    SourceLoc importLoc,
+    ArrayRef<std::pair<Identifier, SourceLoc>> path) {
+  ModuleDecl *MD = loadModuleClang(importLoc, path);
+  if (!MD)
+    MD = loadModuleDWARF(importLoc, path);
+  return MD;
 }
 
 ModuleDecl *ClangImporter::Implementation::finishLoadingClangModule(
@@ -1834,8 +1842,9 @@ bool PlatformAvailability::treatDeprecatedAsUnavailable(
   llvm_unreachable("Unexpected platform");
 }
 
-ClangImporter::Implementation::Implementation(ASTContext &ctx,
-                                              const ClangImporterOptions &opts)
+ClangImporter::Implementation::Implementation(
+    ASTContext &ctx, const ClangImporterOptions &opts,
+    std::unique_ptr<DWARFImporterDelegate> dwarfImporterDelegate)
     : SwiftContext(ctx),
       ImportForwardDeclarations(opts.ImportForwardDeclarations),
       InferImportAsMember(opts.InferImportAsMember),
@@ -1845,8 +1854,8 @@ ClangImporter::Implementation::Implementation(ASTContext &ctx,
       IsReadingBridgingPCH(false),
       CurrentVersion(ImportNameVersion::fromOptions(ctx.LangOpts)),
       BridgingHeaderLookupTable(new SwiftLookupTable(nullptr)),
-      platformAvailability(ctx.LangOpts),
-      nameImporter() {}
+      platformAvailability(ctx.LangOpts), nameImporter(),
+      DWARFImporter(dwarfImporterDelegate) {}
 
 ClangImporter::Implementation::~Implementation() {
 #ifndef NDEBUG
@@ -2489,10 +2498,25 @@ bool ClangImporter::lookupDeclsFromHeader(StringRef Filename,
 }
 
 void ClangImporter::lookupValue(DeclName name, VisibleDeclConsumer &consumer){
+  struct ForwardingConsumer : VisibleDeclConsumer {
+    VisibleDeclConsumer &consumer;
+    bool foundAny = false;
+
+    ForwardingConsumer(ForwardingConsumer &forwardee) : consumer(forwardee) {}
+
+    void foundDecl(ValueDecl *decl, DeclVisibilityKind reason,
+                   DynamicLookupInfo dynamicLookupInfo = {}) override {
+      FoundAny = true;
+      consumer.foundDecl(decl, reason, dynamicLookupInfo);
+    }
+  } forwarder(consumer);
+
   Impl.forEachLookupTable([&](SwiftLookupTable &table) -> bool {
-      Impl.lookupValue(table, name, consumer);
+      Impl.lookupValue(table, name, forwarder);
       return false;
     });
+  if (!forwarder.foundAny)
+    Impl.lookupValueDWARF(name, consumer);
 }
 
 void ClangImporter::lookupTypeDecl(
