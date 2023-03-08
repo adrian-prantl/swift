@@ -288,9 +288,9 @@ private func measure(_ ch: Unicode.Scalar) -> Int {
     return 1
   }
 
-  if ch.properties.isEmoji {
-    return 2
-  }
+  //if ch.properties.isEmoji {
+  //  return 2
+  //}
 
   if ch.properties.isIdeographic
        && !(ch.value >= 0xff61 && ch.value <= 0xffdc)
