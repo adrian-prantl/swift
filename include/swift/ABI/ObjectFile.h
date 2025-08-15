@@ -83,7 +83,7 @@ public:
   }
 };
 
-/// Responsible for providing the COFF reflection section identifiers
+/// Responsible for providing the COFF reflection section identifiers.
 class SwiftObjectFileFormatCOFF : public SwiftObjectFileFormat {
 public:
   llvm::StringRef getSectionName(ReflectionSectionKind section) override {
@@ -101,5 +101,21 @@ public:
     return sectionName.starts_with(".sw5");
   }
 };
+
+/// Responsible for providing the WebAssembly reflection section identifiers.
+/// WebAssembly binaries store all reflection metadata in the DATA
+/// section. There are symbols for each reflection section kind in the "name"
+/// section that point to the corresponding offset inside DATA.
+class SwiftObjectFileFormatWasm : public SwiftObjectFileFormat {
+public:
+  llvm::StringRef getSectionName(ReflectionSectionKind section) override {
+    return "data";
+  }
+
+  bool sectionContainsReflectionData(llvm::StringRef sectionName) override {
+    return sectionName == "data";
+  }
+};
+
 } // namespace swift
 #endif // SWIFT_ABI_OBJECTFILE_H
