@@ -88,6 +88,8 @@ namespace swift {
   class DerivativeAttr;
   class DifferentiableAttr;
   class ExtensionDecl;
+  struct ExplicitSwiftModuleMap;
+  struct ExplicitClangModuleMap;  
   struct ExternalSourceLocs;
   class ForeignRepresentationInfo;
   class FuncDecl;
@@ -1077,6 +1079,9 @@ public:
   /// Adds the path to the explicitly built module \c name.
   void addExplicitModulePath(StringRef name, std::string path);
 
+  ExplicitSwiftModuleMap *getExplicitSwiftModuleMap();
+  ExplicitClangModuleMap *getExplicitClangModuleMap();
+  
   /// Adds a module loader to this AST context.
   ///
   /// \param loader The new module loader, which will be added after any

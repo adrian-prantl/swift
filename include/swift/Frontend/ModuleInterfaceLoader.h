@@ -107,6 +107,7 @@
 #ifndef SWIFT_FRONTEND_MODULEINTERFACELOADER_H
 #define SWIFT_FRONTEND_MODULEINTERFACELOADER_H
 
+#include "swift/AST/ASTContext.h"
 #include "swift/Basic/LLVM.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/ModuleInterfaceSupport.h"
@@ -116,6 +117,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/YAMLTraits.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
 namespace cas {
@@ -141,8 +143,9 @@ class CompilerInvocation;
 /// A ModuleLoader that loads explicitly built Swift modules specified via
 /// -swift-module-file or modules found in a provided
 /// -explicit-swift-module-map-file JSON input.
-class ExplicitSwiftModuleLoader: public SerializedModuleLoaderBase {
-  explicit ExplicitSwiftModuleLoader(ASTContext &ctx, DependencyTracker *tracker,
+class ExplicitSwiftModuleLoader : public SerializedModuleLoaderBase {
+  explicit ExplicitSwiftModuleLoader(ASTContext &ctx,
+                                     DependencyTracker *tracker,
                                      ModuleLoadingMode loadMode,
                                      bool IgnoreSwiftSourceInfoFile);
 
@@ -174,11 +177,11 @@ class ExplicitSwiftModuleLoader: public SerializedModuleLoaderBase {
 
   struct Implementation;
   Implementation &Impl;
+
 public:
   static std::unique_ptr<ExplicitSwiftModuleLoader>
-  create(ASTContext &ctx,
-         DependencyTracker *tracker, ModuleLoadingMode loadMode,
-         StringRef ExplicitSwiftModuleMap,
+  create(ASTContext &ctx, DependencyTracker *tracker,
+         ModuleLoadingMode loadMode, StringRef ExplicitSwiftModuleMap,
          const llvm::StringMap<std::string> &ExplicitSwiftModuleInputs,
          bool IgnoreSwiftSourceInfoFile);
 
@@ -188,6 +191,8 @@ public:
   void collectVisibleTopLevelModuleNames(
       SmallVectorImpl<Identifier> &names) const override;
   ~ExplicitSwiftModuleLoader();
+  ExplicitSwiftModuleMap *getExplicitSwiftModuleMap() override;
+  ExplicitClangModuleMap *getExplicitClangModuleMap() override;
 };
 
 class ExplicitCASModuleLoader : public SerializedModuleLoaderBase {
@@ -240,6 +245,8 @@ public:
   void addExplicitModulePath(StringRef name, std::string path) override;
 
   ~ExplicitCASModuleLoader();
+  ExplicitSwiftModuleMap *getExplicitSwiftModuleMap() override;
+  ExplicitClangModuleMap *getExplicitClangModuleMap() override;
 };
 
 // Explicitly-specified Swift module inputs
@@ -268,6 +275,38 @@ struct ExplicitSwiftModuleInputInfo {
   bool isSystem = false;
   // The cache key for clang module.
   std::optional<std::string> moduleCacheKey;
+
+  void print(llvm::raw_ostream &os, llvm::StringRef name) {
+    os << "  {\n";
+    os << "    \"moduleName\" : \"";
+    os.write_escaped(name);
+    os << ",\n";
+    os << "    \"isFramework\" : " << isFramework << ",\n";
+    os << "    \"isSystem\" : " << isSystem << ",\n";
+    os << "    \"modulePath\" : \"";
+    os.write_escaped(modulePath);
+    os << "\",\n";
+    if (moduleDocPath) {
+      os << "    \"moduleDocPath\" : \"";
+      os.write_escaped(*moduleDocPath);
+      os << "\",\n";
+    }
+    if (moduleSourceInfoPath) {
+      os << "    \"moduleSourceInfoPath\" : \"";
+      os.write_escaped(*moduleSourceInfoPath);
+      os << "\",\n";
+    }
+    if (headerDependencyPaths) {
+      os << "    \"prebuiltHeaderDependencyPaths\" : [";
+      for (auto &dep : *headerDependencyPaths) {
+        os << '"';
+        os.write_escaped(dep);
+        os << "\",";
+      }
+      os << "],";
+    }
+    os << "  },\n";
+  }
 };
 
 // Explicitly-specified Clang module inputs
@@ -289,11 +328,34 @@ struct ExplicitClangModuleInputInfo {
   bool isFramework = false;
   // A flag that indicates whether this module is a system module
   bool isSystem = false;
-  // A flag that indicates whether this is a module dependency of a textual header input
+  // A flag that indicates whether this is a module dependency of a textual
+  // header input
   bool isBridgingHeaderDependency = true;
   // The cache key for clang module.
   std::optional<std::string> moduleCacheKey;
+  void print(llvm::raw_ostream &os, StringRef name) {
+    os << "  {\n";
+    os << "    \"moduleName\" : \"";
+    os.write_escaped(name);
+    os << "\",\n";
+    os << "    \"isFramework\" : " << isFramework << ",\n";
+    os << "    \"isSystem\" : " << isSystem << ",\n";
+    os << "    \"isBridgingHeaderDependency\" : " << isBridgingHeaderDependency << ",\n";
+    os << "    \"modulePath\" : \"";
+    os.write_escaped(modulePath);
+    os << "\",\n";
+    os << "    \"moduleMapPath\" : \"";
+    os.write_escaped(moduleMapPath);
+    os << "\",\n";
+    os << "  },\n";
+  }
 };
+
+struct ExplicitSwiftModuleMap
+    : public llvm::StringMap<ExplicitSwiftModuleInputInfo> {};
+
+struct ExplicitClangModuleMap
+    : public llvm::StringMap<ExplicitClangModuleInputInfo> {};
 
 /// Parser of explicit module maps passed into the compiler.
 //  [
@@ -326,8 +388,8 @@ public:
 
   llvm::Error parseSwiftExplicitModuleMap(
       llvm::MemoryBufferRef BufferRef,
-      llvm::StringMap<ExplicitSwiftModuleInputInfo> &swiftModuleMap,
-      llvm::StringMap<ExplicitClangModuleInputInfo> &clangModuleMap,
+      ExplicitSwiftModuleMap &swiftModuleMap,
+      ExplicitClangModuleMap &clangModuleMap,
       llvm::StringMap<std::string> &moduleAliases) {
     using namespace llvm::yaml;
     // Use a new source manager instead of the one from ASTContext because we
@@ -368,8 +430,8 @@ private:
 
   llvm::Error parseSingleModuleEntry(
       llvm::yaml::Node &node,
-      llvm::StringMap<ExplicitSwiftModuleInputInfo> &swiftModuleMap,
-      llvm::StringMap<ExplicitClangModuleInputInfo> &clangModuleMap,
+      ExplicitSwiftModuleMap &swiftModuleMap,
+      ExplicitClangModuleMap &clangModuleMap,
       llvm::StringMap<std::string> &moduleAliases) {
     using namespace llvm::yaml;
     auto *mapNode = dyn_cast<MappingNode>(&node);

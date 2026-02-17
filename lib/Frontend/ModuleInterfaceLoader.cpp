@@ -2206,12 +2206,12 @@ static void addModuleAliasesFromExplicitSwiftModuleMap(
 struct ExplicitSwiftModuleLoader::Implementation {
   ASTContext &Ctx;
   llvm::BumpPtrAllocator Allocator;
-  llvm::StringMap<ExplicitSwiftModuleInputInfo> ExplicitModuleMap;
+  ExplicitSwiftModuleMap ExplicitModuleMap;
+  ExplicitClangModuleMap ExplicitClangModuleMap;
   Implementation(ASTContext &Ctx) : Ctx(Ctx) {}
 
   void parseSwiftExplicitModuleMap(StringRef fileName) {
     ExplicitModuleMapParser parser(Allocator);
-    llvm::StringMap<ExplicitClangModuleInputInfo> ExplicitClangModuleMap;
     llvm::StringMap<std::string> ModuleAliases;
     // Load the input file.
     llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileBufOrErr =
@@ -2274,6 +2274,12 @@ ExplicitSwiftModuleLoader::ExplicitSwiftModuleLoader(
         Impl(*new Implementation(ctx)) {}
 
 ExplicitSwiftModuleLoader::~ExplicitSwiftModuleLoader() { delete &Impl; }
+ExplicitSwiftModuleMap *ExplicitSwiftModuleLoader::getExplicitSwiftModuleMap() {
+  return &Impl.ExplicitModuleMap;
+}
+ExplicitClangModuleMap *ExplicitSwiftModuleLoader::getExplicitClangModuleMap() {
+  return &Impl.ExplicitClangModuleMap;
+}
 
 bool ExplicitSwiftModuleLoader::findModule(
     ImportPath::Element ModuleID, SmallVectorImpl<char> *ModuleInterfacePath,
@@ -2461,7 +2467,8 @@ struct ExplicitCASModuleLoader::Implementation {
   llvm::cas::ObjectStore &CAS;
   llvm::cas::ActionCache &Cache;
 
-  llvm::StringMap<ExplicitSwiftModuleInputInfo> ExplicitModuleMap;
+  ExplicitSwiftModuleMap ExplicitModuleMap;
+  ExplicitClangModuleMap ExplicitClangModuleMap;
 
   Implementation(ASTContext &Ctx, llvm::cas::ObjectStore &CAS,
                  llvm::cas::ActionCache &Cache)
@@ -2500,7 +2507,6 @@ struct ExplicitCASModuleLoader::Implementation {
       return;
 
     ExplicitModuleMapParser parser(Allocator);
-    llvm::StringMap<ExplicitClangModuleInputInfo> ExplicitClangModuleMap;
     llvm::StringMap<std::string> ModuleAliases;
     auto buf = loadBuffer(ID);
     if (!buf) {
@@ -2641,6 +2647,12 @@ ExplicitCASModuleLoader::ExplicitCASModuleLoader(ASTContext &ctx,
       Impl(*new Implementation(ctx, CAS, cache)) {}
 
 ExplicitCASModuleLoader::~ExplicitCASModuleLoader() { delete &Impl; }
+ExplicitSwiftModuleMap *ExplicitCASModuleLoader::getExplicitSwiftModuleMap() {
+  return &Impl.ExplicitModuleMap;
+}
+ExplicitClangModuleMap *ExplicitCASModuleLoader::getExplicitClangModuleMap() {
+  return &Impl.ExplicitClangModuleMap;
+}
 
 bool ExplicitCASModuleLoader::findModule(
     ImportPath::Element ModuleID, SmallVectorImpl<char> *ModuleInterfacePath,
